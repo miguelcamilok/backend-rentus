@@ -37,7 +37,7 @@ class Property extends Model
 
     protected $casts = [
         'included_services' => 'array',
-        'image_url'         => 'array',
+        'image_url'         => 'array', // Will keep this for now but move to images relation
         'publication_date'  => 'date',
         'monthly_price'     => 'decimal:2',
         'area_m2'           => 'decimal:2',
@@ -74,6 +74,11 @@ class Property extends Model
     public function rentalRequests()
     {
         return $this->hasMany(RentalRequest::class);
+    }
+
+    public function images()
+    {
+        return $this->hasMany(PropertyImage::class)->orderBy('order');
     }
 
     // ==================== SCOPES ====================
@@ -157,6 +162,13 @@ class Property extends Model
 
     public function getMainImageAttribute(): ?string
     {
+        // Priorizar la primera imagen de la nueva relación
+        $firstImage = $this->images->first();
+        if ($firstImage) {
+            return $firstImage->url;
+        }
+
+        // Fallback a image_url antiguo (que eran base64 o URLs)
         $images = $this->image_url;
         return is_array($images) && count($images) > 0 ? $images[0] : null;
     }

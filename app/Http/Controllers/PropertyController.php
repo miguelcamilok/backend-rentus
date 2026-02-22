@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Property;
+use App\Models\PropertyImage;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -116,7 +117,7 @@ class PropertyController extends Controller
             : 'created_at';
         $sortOrder = $request->input('sort_order', 'desc') === 'asc' ? 'asc' : 'desc';
 
-        $query = Property::with('user:id,name,email,phone,photo')
+        $query = Property::with(['user:id,name,email,phone,photo', 'images'])
             ->when($request->filled('search'), function ($q) use ($request) {
                 $s = $request->input('search');
                 $q->where(fn ($q2) =>
@@ -151,7 +152,7 @@ class PropertyController extends Controller
      */
     public function show(Property $property): JsonResponse
     {
-        $property->load('user:id,name,email,phone,photo');
+        $property->load(['user:id,name,email,phone,photo', 'images']);
 
         return response()->json([
             'success' => true,
@@ -179,7 +180,8 @@ class PropertyController extends Controller
             'lng'               => 'nullable|numeric',
             'accuracy'          => 'nullable|numeric',
             'user_id'           => 'nullable|integer|exists:users,id',
-            'images'            => 'nullable|string', // JSON array de base64
+            'images'            => 'nullable|array',
+            'images.*'          => 'image|mimes:jpeg,png,jpg,gif|max:5120',
             'publication_date'  => 'nullable|date',
         ]);
 
@@ -199,23 +201,20 @@ class PropertyController extends Controller
                 $validated['visibility']      = 'published';
             }
 
-            // Procesar imágenes base64
-            $imagesJson = null;
-            if (!empty($validated['images'])) {
-                $decoded = json_decode($validated['images'], true);
-                if (is_array($decoded) && count($decoded) > 0) {
-                    $valid = $this->filterValidBase64Images($decoded);
-                    if ($valid) {
-                        $imagesJson = json_encode($valid);
-                        Log::info('Procesadas ' . count($valid) . ' imágenes válidas');
-                    }
+            $property = Property::create($validated);
+
+            // Procesar imágenes reales (archivos)
+            if ($request->hasFile('images')) {
+                foreach ($request->file('images') as $index => $file) {
+                    $path = $file->store('properties', 'public');
+                    PropertyImage::create([
+                        'property_id' => $property->id,
+                        'path'        => $path,
+                        'is_main'     => $index === 0,
+                        'order'       => $index,
+                    ]);
                 }
             }
-
-            unset($validated['images']);
-            $validated['image_url'] = $imagesJson;
-
-            $property = Property::create($validated);
 
             DB::commit();
 
@@ -276,9 +275,10 @@ class PropertyController extends Controller
             'included_services' => 'sometimes|string',
             'lat'               => 'sometimes|numeric',
             'lng'               => 'sometimes|numeric',
-            'images'            => 'sometimes|string',
+            'images'            => 'sometimes|array',
+            'images.*'          => 'image|mimes:jpeg,png,jpg,gif|max:5120',
             'delete_images'     => 'sometimes|array',
-            'delete_images.*'   => 'integer|min:0',
+            'delete_images.*'   => 'integer|exists:property_images,id',
             'reorder_images'    => 'sometimes|array',
         ]);
 
@@ -289,44 +289,44 @@ class PropertyController extends Controller
                 $validated['included_services'] = $this->normalizeServices($validated['included_services']);
             }
 
-            // Imágenes actuales como array PHP
-            $currentImages = $this->decodeImages($property->image_url);
-
-            // 1. Eliminar por índice
+            // 1. Eliminar imágenes por ID
             if (!empty($validated['delete_images'])) {
-                foreach ($validated['delete_images'] as $idx) {
-                    unset($currentImages[$idx]);
+                $imagesToDelete = PropertyImage::whereIn('id', $validated['delete_images'])
+                    ->where('property_id', $property->id)
+                    ->get();
+                
+                foreach ($imagesToDelete as $img) {
+                    \Illuminate\Support\Facades\Storage::disk('public')->delete($img->path);
+                    $img->delete();
                 }
-                $currentImages = array_values($currentImages);
             }
 
-            // 2. Reordenar
-            if (!empty($validated['reorder_images'])) {
-                $reordered = [];
-                foreach ($validated['reorder_images'] as $oldIndex => $newOrder) {
-                    if (isset($currentImages[$oldIndex])) {
-                        $reordered[(int) $newOrder] = $currentImages[$oldIndex];
-                    }
-                }
-                ksort($reordered);
-                $currentImages = array_values($reordered);
-            }
+            // 2. Reordenar (Opcional, si se envía una lista de IDs en orden)
+            // if (!empty($validated['reorder_images'])) { ... }
 
             // 3. Agregar nuevas imágenes
-            if (!empty($validated['images'])) {
-                $newImages = json_decode($validated['images'], true);
-                if (is_array($newImages)) {
-                    foreach ($newImages as $img) {
-                        if (str_starts_with($img, 'data:image/')) {
-                            $currentImages[] = $img;
-                        }
-                    }
+            if ($request->hasFile('images')) {
+                $lastOrder = $property->images()->max('order') ?? -1;
+                foreach ($request->file('images') as $index => $file) {
+                    $path = $file->store('properties', 'public');
+                    PropertyImage::create([
+                        'property_id' => $property->id,
+                        'path'        => $path,
+                        'is_main'     => false, // Podría mejorarse para elegir la principal
+                        'order'       => $lastOrder + 1 + $index,
+                    ]);
                 }
             }
 
-            $validated['image_url'] = count($currentImages) > 0
-                ? json_encode($currentImages)
-                : null;
+            unset($validated['images'], $validated['delete_images'], $validated['reorder_images']);
+            
+            // Actualizar is_main si no hay ninguna primaria
+            if ($property->images()->where('is_main', true)->count() === 0) {
+                $first = $property->images()->first();
+                if ($first) {
+                    $first->update(['is_main' => true]);
+                }
+            }
 
             unset($validated['images'], $validated['delete_images'], $validated['reorder_images']);
 
@@ -334,7 +334,7 @@ class PropertyController extends Controller
 
             DB::commit();
 
-            $property->load('user:id,name,email,phone,photo');
+            $property->load(['user:id,name,email,phone,photo', 'images']);
 
             return response()->json([
                 'success'  => true,

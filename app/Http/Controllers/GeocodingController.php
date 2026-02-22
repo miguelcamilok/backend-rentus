@@ -19,6 +19,8 @@ class GeocodingController extends Controller
         $format = $request->input('format', 'json');
         $limit = $request->input('limit', 5);
 
+        Log::info('Geocoding Request:', ['query' => $query, 'limit' => $limit]);
+
         if (!$query) {
             return response()->json(['error' => 'Query is required'], 400);
         }

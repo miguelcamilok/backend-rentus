@@ -165,10 +165,15 @@ class PropertyController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
-        // Limpiar inputs numéricos que puedan venir como strings vacíos o "NaN" desde el frontend
+        Log::info('===== DEBUG: INICIO STORE =====');
+        Log::info('Raw Request Data:', $request->all());
+        Log::info('Files:', array_keys($request->allFiles()));
+        
+        // Limpiar inputs numéricos
         $data = $request->all();
         foreach (['lat', 'lng', 'accuracy', 'monthly_price', 'area_m2', 'num_bedrooms', 'num_bathrooms'] as $field) {
             if (isset($data[$field]) && ($data[$field] === '' || $data[$field] === 'NaN' || $data[$field] === 'undefined' || $data[$field] === 'null')) {
+                Log::info("Limpiando campo {$field}: valor original '{$data[$field]}'");
                 $data[$field] = null;
             }
         }
@@ -195,9 +200,9 @@ class PropertyController extends Controller
         ]);
 
         if ($validator->fails()) {
-            Log::warning('Error de validación en creación de propiedad:', [
+            Log::error('DEBUG: Falló la validación', [
                 'errors' => $validator->errors()->toArray(),
-                'input'  => $request->except(['images'])
+                'input'  => $data
             ]);
             return response()->json([
                 'success' => false,
@@ -207,39 +212,62 @@ class PropertyController extends Controller
         }
 
         $validated = $validator->validated();
+        Log::info('DEBUG: Datos validados:', $validated);
 
-        // Resolvemos el usuario UNA sola vez para evitar múltiples llamadas a Auth
+        // Resolvemos el usuario
         $user = $this->authUser();
+        Log::info("DEBUG: Auth User ID: {$user->id}");
 
         try {
+            Log::info('DEBUG: Iniciando Transacción...');
             DB::beginTransaction();
 
             $validated['included_services'] = $this->normalizeServices($request->input('included_services'));
             $validated['user_id']           = $request->input('user_id') ?: $user->id;
             $validated['publication_date']  = $request->input('publication_date') ?: now()->toDateString();
-
+            
+            // Forzar valores por defecto para evitar errores NOT NULL en DB si no vinieron en la petición
+            $validated['city'] = $validated['city'] ?? 'Sin Ciudad';
+            $validated['status'] = $validated['status'] ?? 'available';
+            $validated['area_m2'] = $validated['area_m2'] ?? 0;
+            $validated['num_bedrooms'] = $validated['num_bedrooms'] ?? '0';
+            $validated['num_bathrooms'] = $validated['num_bathrooms'] ?? '0';
+            $validated['image_url'] = []; // Campo legado que sigue siendo NOT NULL en algunas versiones
+            
             // Auto-aprobar si es admin/support
             if (in_array($user->role, self::ADMIN_ROLES, true)) {
                 $validated['approval_status'] = 'approved';
                 $validated['visibility']      = 'published';
             }
 
+            Log::info('DEBUG: Datos finales para Property::create:', $validated);
+
             $property = Property::create($validated);
+            Log::info("DEBUG: Propiedad creada con ID: {$property->id}");
 
             // Procesar imágenes reales (archivos)
             if ($request->hasFile('images')) {
+                Log::info('Procesando ' . count($request->file('images')) . ' imágenes...');
                 foreach ($request->file('images') as $index => $file) {
+                    Log::info("Subiendo imagen {$index}: " . $file->getClientOriginalName());
                     $path = $file->store('properties', 'public');
+                    Log::info("Imagen {$index} guardada en: {$path}");
+                    
                     PropertyImage::create([
                         'property_id' => $property->id,
                         'path'        => $path,
                         'is_main'     => $index === 0,
                         'order'       => $index,
                     ]);
+                    Log::info("Registro de PropertyImage creado para imagen {$index}");
                 }
+            } else {
+                Log::info('No se detectaron archivos de imagen en la petición.');
             }
 
+            Log::info('Committing DB Transaction...');
             DB::commit();
+            Log::info('Transacción completada con éxito.');
 
             $property->load('user:id,name,email,phone,photo');
 
@@ -261,12 +289,19 @@ class PropertyController extends Controller
 
         } catch (\Throwable $e) {
             DB::rollBack();
-            Log::error('Error creando propiedad: ' . $e->getMessage());
+            Log::error('FATAL ERROR en creación de propiedad:', [
+                'message' => $e->getMessage(),
+                'file'    => $e->getFile(),
+                'line'    => $e->getLine(),
+                'trace'   => $e->getTraceAsString()
+            ]);
             return response()->json([
                 'success' => false,
                 'message' => 'Error al crear la propiedad',
                 'error'   => $e->getMessage(),
-                'trace'   => config('app.debug') ? $e->getTraceAsString() : null,
+                'file'    => $e->getFile(),
+                'line'    => $e->getLine(),
+                'trace'   => config('app.debug') ? $e->getTraceAsString() : 'Check logs for trace',
             ], 500);
         }
     }

@@ -1,138 +1,158 @@
 #!/bin/bash
 set -e
 
-# =========================
-# CONFIG BÁSICA
-# =========================
-APP_DIR=/var/www/html
-APACHE_USER=www-data
-APACHE_GROUP=www-data
-
-cd $APP_DIR
-
-# Asegurar permisos heredables
-umask 002
-
-# =========================
-# APACHE + MPM
-# =========================
+# Deshabilitar TODOS los MPM primero
 echo "Disabling all MPM modules..."
 a2dismod mpm_event mpm_worker mpm_prefork worker event 2>/dev/null || true
 
+# Habilitar solo mpm_prefork
 echo "Enabling mpm_prefork..."
-a2enmod mpm_prefork headers rewrite
+a2enmod mpm_prefork
 
-echo "Enabled MPM modules:"
-ls -la /etc/apache2/mods-enabled/mpm_* 2>/dev/null || true
+# Habilitar módulo headers de Apache
+echo "Enabling Apache headers module..."
+a2enmod headers
 
-# =========================
-# PUERTO DINÁMICO (Railway)
-# =========================
+# Verificar qué MPM están habilitados
+echo "Currently enabled MPM modules:"
+ls -la /etc/apache2/mods-enabled/mpm_* 2>/dev/null || echo "No MPM symlinks found"
+
+# Configurar el puerto
 PORT=${PORT:-80}
-echo "Configuring Apache on port $PORT"
+echo "Configuring Apache to listen on port $PORT..."
 
 sed -i "s/Listen 80/Listen ${PORT}/" /etc/apache2/ports.conf
 sed -i "s/<VirtualHost \*:80>/<VirtualHost *:${PORT}>/" /etc/apache2/sites-available/*.conf
 
-# =========================
-# CORS (Apache)
-# =========================
+# ===== CONFIGURAR CORS EN APACHE =====
 echo "Configuring CORS headers..."
-grep -q "CORS Configuration" /etc/apache2/apache2.conf || cat >> /etc/apache2/apache2.conf << 'EOF'
+cat >> /etc/apache2/apache2.conf << 'EOF'
 
 # CORS Configuration
 <IfModule mod_headers.c>
-    Header always set Access-Control-Allow-Origin "*"
-    Header always set Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-    Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With, Accept"
-    Header always set Access-Control-Max-Age "3600"
+    Header unset Access-Control-Allow-Origin
+    Header unset Access-Control-Allow-Methods
+    Header unset Access-Control-Allow-Headers
+    Header unset Access-Control-Allow-Credentials
+    Header unset Access-Control-Max-Age
+
+    Header set Access-Control-Allow-Origin "*"
+    Header set Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    Header set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With, Accept"
+    Header set Access-Control-Allow-Credentials "true"
+    Header set Access-Control-Max-Age "3600"
 </IfModule>
 EOF
 
-# =========================
-# STORAGE LARAVEL (CRÍTICO)
-# =========================
-echo "Setting up Laravel storage..."
+# ===== CREAR DIRECTORIOS DE LOGS Y CONFIGURAR PERMISOS =====
+echo "Setting up Laravel storage directories..."
+mkdir -p /var/www/html/storage/logs
+mkdir -p /var/www/html/storage/framework/cache
+mkdir -p /var/www/html/storage/framework/sessions
+mkdir -p /var/www/html/storage/framework/views
+mkdir -p /var/www/html/bootstrap/cache
 
-mkdir -p storage/logs
-mkdir -p storage/framework/{cache,sessions,views}
-mkdir -p bootstrap/cache
+# >>> STORAGE FIX: carpeta pública real
+mkdir -p /var/www/html/storage/app/public
 
-chown -R ${APACHE_USER}:${APACHE_GROUP} storage bootstrap/cache
-chmod -R ug+rwx storage bootstrap/cache
+# Configurar permisos
+chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
+chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
 
-# Archivo de log obligatorio
-touch storage/logs/laravel.log
-chmod 666 storage/logs/laravel.log
+# >>> STORAGE FIX: permisos explícitos para archivos públicos
+chmod -R 775 /var/www/html/storage/app/public
 
-# =========================
-# STORAGE LINK (SEGURO)
-# =========================
-if [ -d "public/storage" ] || [ -L "public/storage" ]; then
-  echo "Removing existing public/storage"
-  rm -rf public/storage
-fi
+# >>> STORAGE FIX: crear symlink public/storage
+echo "Linking Laravel storage..."
+rm -rf /var/www/html/public/storage
+php artisan storage:link || true
 
-if [ -f "artisan" ]; then
-  echo "Linking storage..."
-  php artisan storage:link || true
-else
-  echo "❌ artisan not found — aborting"
-  exit 1
-fi
+# >>> STORAGE FIX: permitir acceso desde Apache
+cat >> /etc/apache2/apache2.conf << 'EOF'
 
-# =========================
-# LIMPIEZA CONTROLADA
-# =========================
-echo "Cleaning Laravel caches..."
-php artisan optimize:clear || true
+# Laravel public storage access
+<Directory "/var/www/html/public/storage">
+    Options FollowSymLinks
+    AllowOverride None
+    Require all granted
+</Directory>
+EOF
 
-# =========================
-# ESPERAR DB
-# =========================
-echo "Waiting for database..."
+# ===== LIMPIAR TODO =====
+echo "🧹 Cleaning ALL caches, logs, and old files..."
+
+rm -rf /var/www/html/bootstrap/cache/*.php
+rm -rf /var/www/html/storage/framework/cache/data/*
+rm -rf /var/www/html/storage/framework/sessions/*
+rm -rf /var/www/html/storage/framework/views/*.php
+rm -f /var/www/html/storage/logs/*.log
+
+touch /var/www/html/storage/logs/laravel.log
+chown www-data:www-data /var/www/html/storage/logs/laravel.log
+chmod 666 /var/www/html/storage/logs/laravel.log
+
+# ===== VERIFICAR VARIABLES DE ENTORNO =====
+echo "📧 Verificando variables de correo..."
+echo "MAIL_MAILER: ${MAIL_MAILER}"
+echo "MAIL_HOST: ${MAIL_HOST}"
+echo "MAIL_PORT: ${MAIL_PORT}"
+echo "MAIL_USERNAME: ${MAIL_USERNAME}"
+echo "MAIL_ENCRYPTION: ${MAIL_ENCRYPTION}"
+
+# Esperar base de datos
+echo "Waiting for database connection..."
 timeout=30
-elapsed=0
-
-until php artisan migrate:status >/dev/null 2>&1 || [ $elapsed -ge $timeout ]; do
+counter=0
+until php artisan migrate:status > /dev/null 2>&1 || [ $counter -eq $timeout ]; do
+  echo "Database not ready yet... waiting ($counter/$timeout)"
   sleep 2
-  elapsed=$((elapsed + 2))
-  echo "Waiting for DB... (${elapsed}s)"
+  counter=$((counter + 2))
 done
 
-if [ $elapsed -lt $timeout ]; then
+if [ $counter -lt $timeout ]; then
   echo "Running migrations..."
-  php artisan migrate --force || true
+  php artisan migrate --force || echo "Migrations failed or not needed"
 else
-  echo "⚠️ Database not ready, skipping migrations"
+  echo "Warning: Could not connect to database, skipping migrations"
 fi
 
-# =========================
-# CACHE FINAL (ORDEN CORRECTO)
-# =========================
-echo "Caching configuration..."
+# ===== LIMPIAR Y CACHEAR CONFIGURACIÓN =====
+echo "Clearing Laravel caches..."
 php artisan config:clear
-php artisan config:cache
-php artisan route:cache || true
-php artisan view:cache || true
+php artisan cache:clear
+php artisan view:clear
+php artisan event:clear 2>/dev/null || true
+php artisan route:clear
 
-# =========================
-# QUEUE CLEAN
-# =========================
+echo "🔧 Caching configuration..."
+php artisan config:cache
+php artisan route:cache
+php artisan view:cache
+
+# Limpiar cola
+echo "Clearing queue..."
 php artisan queue:clear 2>/dev/null || true
 php artisan queue:flush 2>/dev/null || true
+php artisan tinker --execute="DB::table('jobs')->truncate();" 2>/dev/null || true
+php artisan tinker --execute="DB::table('failed_jobs')->truncate();" 2>/dev/null || true
 
-# =========================
-# START SERVICES
-# =========================
+# ===== VERIFICAR CONFIGURACIÓN DE MAIL =====
+echo "🔍 Verificando configuración de Mail..."
+php artisan tinker --execute="
+echo 'MAIL_MAILER: ' . config('mail.default') . PHP_EOL;
+echo 'MAIL_HOST: ' . config('mail.mailers.smtp.host') . PHP_EOL;
+echo 'MAIL_PORT: ' . config('mail.mailers.smtp.port') . PHP_EOL;
+echo 'MAIL_USERNAME: ' . config('mail.mailers.smtp.username') . PHP_EOL;
+echo 'MAIL_ENCRYPTION: ' . config('mail.mailers.smtp.encryption') . PHP_EOL;
+echo 'MAIL_FROM: ' . config('mail.from.address') . PHP_EOL;
+"
+
+# Iniciar Apache en segundo plano
 echo "Starting Apache on port $PORT..."
 apache2-foreground &
 
-echo "Starting Laravel queue worker..."
-php artisan queue:work \
-  --tries=3 \
-  --timeout=60 \
-  --sleep=3 \
-  --max-jobs=1000 &
+# Iniciar worker de cola
+echo "Starting queue worker..."
+php artisan queue:work --tries=3 --timeout=60 --sleep=3 --max-jobs=1000 &
 
 wait

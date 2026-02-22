@@ -19,6 +19,7 @@ class DatabaseSeeder extends Seeder
             PropertySeeder::class,
             ContractSeeder::class,
             PaymentSeeder::class,
+            PaymentSimulationSeeder::class, // <-- Seeder de prueba de pago
             RatingSeeder::class,
             MaintenanceSeeder::class,
             ReportSeeder::class,

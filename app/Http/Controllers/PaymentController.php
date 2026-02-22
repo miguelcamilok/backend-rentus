@@ -148,4 +148,54 @@ class PaymentController extends Controller
             'message' => 'Pago eliminado exitosamente',
         ]);
     }
+
+    public function processSimulation(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'contract_id'    => 'required|integer|exists:contracts,id',
+            'amount'         => 'required|numeric|min:0',
+            'payment_method_id' => 'nullable|integer|exists:payment_methods,id',
+            // Or if they are passing raw card info (simulate saving it)
+            'card_last_four' => 'nullable|string|size:4',
+            'card_type'      => 'nullable|string',
+        ]);
+
+        $userId = Auth::id();
+        $contract = Contract::findOrFail($validated['contract_id']);
+
+        // Only tenant can pay
+        if ($contract->tenant_id !== $userId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No tienes permisos para realizar pagos en este contrato',
+            ], 403);
+        }
+
+        // Allow payment if status is pending (pendiente por pago) or active
+        if (!in_array($contract->status, ['pending', 'active'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Este contrato no admite pagos en su estado actual',
+            ], 400);
+        }
+
+        // Create the payment record
+        $payment = Payment::create([
+            'contract_id'    => $contract->id,
+            'amount'         => $validated['amount'],
+            'status'         => 'paid',
+            'payment_date'   => now()->toDateString(),
+            'payment_method' => $validated['card_type'] ?? 'card',
+            'receipt_path'  => 'simulated_receipt_' . time() . '.pdf',
+        ]);
+
+        // Update contract status to active as requested (UX improvement)
+        $contract->update(['status' => 'active']);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Pago procesado exitosamente',
+            'data'    => $payment->load('contract.property:id,title'),
+        ]);
+    }
 }

@@ -7,6 +7,7 @@ use App\Http\Controllers\ContractController;
 use App\Http\Controllers\MaintenanceController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\PaymentController;
+use App\Http\Controllers\PaymentMethodController;
 use App\Http\Controllers\PropertyController;
 use App\Http\Controllers\RatingController;
 use App\Http\Controllers\RentalRequestController;
@@ -27,6 +28,9 @@ use App\Http\Controllers\Admin\AdminViewController;
 |--------------------------------------------------------------------------
 */
 
+// TEST ROUTE - Hitting http://api.rentus/api/v1-test should return "API OK"
+Route::get('v1-test', function() { return response()->json(['message' => 'API OK']); });
+
 // Propiedades públicas (listado y detalle)
 Route::prefix('properties')->group(function () {
     Route::get('/', [PropertyController::class, 'index']);
@@ -42,7 +46,7 @@ Route::get('geocoding/search', [\App\Http\Controllers\GeocodingController::class
 |--------------------------------------------------------------------------
 | Autenticación (con throttle)
 |--------------------------------------------------------------------------
-*/
+|*/
 Route::prefix('auth')->middleware('throttle:10,1')->group(function () {
     Route::post('register', [AuthController::class, 'register']);
     Route::post('login', [AuthController::class, 'login']);
@@ -57,7 +61,7 @@ Route::prefix('auth')->middleware('throttle:10,1')->group(function () {
 |--------------------------------------------------------------------------
 | Rutas Protegidas (requieren JWT)
 |--------------------------------------------------------------------------
-*/
+|*/
 // Debug & Storage Testing
 Route::post('/test-upload', [\App\Http\Controllers\FileUploadController::class, 'upload'])->middleware('auth:api');
 
@@ -81,6 +85,11 @@ Route::middleware('auth:api')->group(function () {
         Route::delete('{id}', [UserController::class, 'destroy']);
         Route::patch('{id}/status', [UserController::class, 'updateStatus']);
     });
+
+    // ── Métodos de Pago (Movidos arriba para prioridad) ──────────
+    Route::get('payment-methods', [PaymentMethodController::class, 'index']);
+    Route::post('payment-methods', [PaymentMethodController::class, 'store']);
+    Route::delete('payment-methods/{paymentMethod}', [PaymentMethodController::class, 'destroy']);
 
     // ── Propiedades (CRUD autenticado) ──────────
     Route::prefix('properties')->group(function () {
@@ -116,6 +125,7 @@ Route::middleware('auth:api')->group(function () {
     });
 
     // ── Pagos ───────────────────────────────────
+    Route::post('payments/simulate', [PaymentController::class, 'processSimulation']);
     Route::apiResource('payments', PaymentController::class);
 
     // ── Calificaciones ──────────────────────────
@@ -139,7 +149,7 @@ Route::middleware('auth:api')->group(function () {
     |----------------------------------------------------------------------
     | Panel de Administración (admin + support)
     |----------------------------------------------------------------------
-    */
+    |*/
     Route::prefix('admin')->middleware('role:admin,support')->group(function () {
 
         // ── Dashboard ────────────────────────

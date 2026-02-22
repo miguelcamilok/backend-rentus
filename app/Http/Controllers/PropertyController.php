@@ -165,6 +165,7 @@ class PropertyController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        $startTime = microtime(true);
         Log::info('===== DEBUG: INICIO STORE =====');
         Log::info('Raw Request Data:', $request->all());
         Log::info('Files:', array_keys($request->allFiles()));
@@ -260,7 +261,8 @@ class PropertyController extends Controller
 
             return response()->json([
                 'success' => true,
-                'property' => $property
+                'property' => $property,
+                'execution_time' => microtime(true) - $startTime
             ], 201);
 
         } catch (\Throwable $e) {
@@ -277,7 +279,9 @@ class PropertyController extends Controller
                 'message' => 'Error Fatal: ' . $e->getMessage(),
                 'file'    => $e->getFile(),
                 'line'    => $e->getLine(),
-                'trace'   => $e->getTrace() // FORZADO para que el usuario lo vea
+                'trace'   => $e->getTraceAsString(), // Seguro para JSON
+                'input'   => $request->except(['images']),
+                'execution_time' => microtime(true) - $startTime
             ], 500);
         }
     }

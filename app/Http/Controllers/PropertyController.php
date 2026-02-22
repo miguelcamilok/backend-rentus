@@ -169,139 +169,115 @@ class PropertyController extends Controller
         Log::info('Raw Request Data:', $request->all());
         Log::info('Files:', array_keys($request->allFiles()));
         
-        // Limpiar inputs numéricos
-        $data = $request->all();
-        foreach (['lat', 'lng', 'accuracy', 'monthly_price', 'area_m2', 'num_bedrooms', 'num_bathrooms'] as $field) {
-            if (isset($data[$field]) && ($data[$field] === '' || $data[$field] === 'NaN' || $data[$field] === 'undefined' || $data[$field] === 'null')) {
-                Log::info("Limpiando campo {$field}: valor original '{$data[$field]}'");
-                $data[$field] = null;
-            }
-        }
-
-        // Re-validar con los datos limpios
-        $validator = \Illuminate\Support\Facades\Validator::make($data, [
-            'title'             => 'required|string|max:255',
-            'description'       => 'required|string',
-            'address'           => 'required|string',
-            'city'              => 'nullable|string|max:120',
-            'status'            => 'nullable|string|in:available,rented,maintenance',
-            'monthly_price'     => 'required|numeric|min:0',
-            'area_m2'           => 'nullable|numeric|min:0',
-            'num_bedrooms'      => 'nullable|integer|min:0',
-            'num_bathrooms'     => 'nullable|integer|min:0',
-            'included_services' => 'nullable|string',
-            'lat'               => 'nullable|numeric',
-            'lng'               => 'nullable|numeric',
-            'accuracy'          => 'nullable|numeric',
-            'user_id'           => 'nullable|integer|exists:users,id',
-            'images'            => 'nullable|array',
-            'images.*'          => 'image|mimes:jpeg,png,jpg,gif,webp|max:5120', // Agregado webp
-            'publication_date'  => 'nullable|date',
-        ]);
-
-        if ($validator->fails()) {
-            Log::error('DEBUG: Falló la validación', [
-                'errors' => $validator->errors()->toArray(),
-                'input'  => $data
-            ]);
-            return response()->json([
-                'success' => false,
-                'message' => 'Error de validación',
-                'errors'  => $validator->errors(),
-            ], 422);
-        }
-
-        $validated = $validator->validated();
-        Log::info('DEBUG: Datos validados:', $validated);
-
-        // Resolvemos el usuario
-        $user = $this->authUser();
-        Log::info("DEBUG: Auth User ID: {$user->id}");
-
         try {
-            Log::info('DEBUG: Iniciando Transacción...');
-            DB::beginTransaction();
-
-            $validated['included_services'] = $this->normalizeServices($request->input('included_services'));
-            $validated['user_id']           = $request->input('user_id') ?: $user->id;
-            $validated['publication_date']  = $request->input('publication_date') ?: now()->toDateString();
+            Log::info('===== DEBUG: INICIO STORE (PROCEDURAL) =====');
             
-            // Forzar valores por defecto para evitar errores NOT NULL en DB si no vinieron en la petición
-            $validated['city'] = $validated['city'] ?? 'Sin Ciudad';
+            // Limpiar inputs numéricos
+            $data = $request->all();
+            foreach (['lat', 'lng', 'accuracy', 'monthly_price', 'area_m2', 'num_bedrooms', 'num_bathrooms'] as $field) {
+                if (isset($data[$field]) && ($data[$field] === '' || $data[$field] === 'NaN' || $data[$field] === 'undefined' || $data[$field] === 'null')) {
+                    Log::info("DEBUG: Limpiando {$field}");
+                    $data[$field] = null;
+                }
+            }
+
+            // Re-validar
+            $validator = \Illuminate\Support\Facades\Validator::make($data, [
+                'title'             => 'required|string|max:255',
+                'description'       => 'required|string',
+                'address'           => 'required|string',
+                'city'              => 'nullable|string|max:120',
+                'status'            => 'nullable|string|in:available,rented,maintenance',
+                'monthly_price'     => 'required|numeric|min:0',
+                'area_m2'           => 'nullable|numeric|min:0',
+                'num_bedrooms'      => 'nullable|integer|min:0',
+                'num_bathrooms'     => 'nullable|integer|min:0',
+                'included_services' => 'nullable|string',
+                'lat'               => 'nullable|numeric',
+                'lng'               => 'nullable|numeric',
+                'accuracy'          => 'nullable|numeric',
+                'user_id'           => 'nullable|integer|exists:users,id',
+                'images'            => 'nullable|array',
+                'images.*'          => 'image|mimes:jpeg,png,jpg,gif,webp|max:5120',
+                'publication_date'  => 'nullable|date',
+            ]);
+
+            if ($validator->fails()) {
+                Log::error('DEBUG: Errores de validación', $validator->errors()->toArray());
+                return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+            }
+
+            $validated = $validator->validated();
+            $user = $this->authUser();
+            
+            if (!$user) {
+                Log::error('DEBUG: No hay usuario autenticado en el controlador');
+                return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+            }
+
+            DB::beginTransaction();
+            Log::info('DEBUG: Transacción iniciada');
+
+            // Normalización final
+            $validated['included_services'] = $this->normalizeServices($request->input('included_services'));
+            $validated['user_id'] = $request->input('user_id') ?: $user->id;
+            $validated['publication_date'] = $request->input('publication_date') ?: now()->toDateString();
+            
+            // Forzar defaults para evitar NOT NULL constraints
+            $validated['city'] = $validated['city'] ?? 'Popayán';
             $validated['status'] = $validated['status'] ?? 'available';
             $validated['area_m2'] = $validated['area_m2'] ?? 0;
-            $validated['num_bedrooms'] = $validated['num_bedrooms'] ?? '0';
-            $validated['num_bathrooms'] = $validated['num_bathrooms'] ?? '0';
-            $validated['image_url'] = []; // Campo legado que sigue siendo NOT NULL en algunas versiones
-            
-            // Auto-aprobar si es admin/support
-            if (in_array($user->role, self::ADMIN_ROLES, true)) {
+            $validated['num_bedrooms'] = $validated['num_bedrooms'] ?? 0;
+            $validated['num_bathrooms'] = $validated['num_bathrooms'] ?? 0;
+            $validated['image_url'] = [];
+
+            if ($this->isAdmin()) {
                 $validated['approval_status'] = 'approved';
-                $validated['visibility']      = 'published';
+                $validated['visibility'] = 'published';
             }
 
-            Log::info('DEBUG: Datos finales para Property::create:', $validated);
-
+            Log::info('DEBUG: Intentando Property::create', $validated);
             $property = Property::create($validated);
-            Log::info("DEBUG: Propiedad creada con ID: {$property->id}");
+            Log::info("DEBUG: Propiedad creada ID: {$property->id}");
 
-            // Procesar imágenes reales (archivos)
             if ($request->hasFile('images')) {
-                Log::info('Procesando ' . count($request->file('images')) . ' imágenes...');
+                Log::info('DEBUG: Procesando imágenes...');
                 foreach ($request->file('images') as $index => $file) {
-                    Log::info("Subiendo imagen {$index}: " . $file->getClientOriginalName());
                     $path = $file->store('properties', 'public');
-                    Log::info("Imagen {$index} guardada en: {$path}");
-                    
                     PropertyImage::create([
                         'property_id' => $property->id,
                         'path'        => $path,
                         'is_main'     => $index === 0,
                         'order'       => $index,
                     ]);
-                    Log::info("Registro de PropertyImage creado para imagen {$index}");
                 }
-            } else {
-                Log::info('No se detectaron archivos de imagen en la petición.');
             }
 
-            Log::info('Committing DB Transaction...');
             DB::commit();
-            Log::info('Transacción completada con éxito.');
+            Log::info('DEBUG: Transacción commiteada');
 
             $property->load('user:id,name,email,phone,photo');
 
-            Log::info("Propiedad creada ID: {$property->id}");
-
             return response()->json([
-                'success'  => true,
-                'message'  => 'Propiedad creada exitosamente',
-                'property' => $property,
+                'success' => true,
+                'property' => $property
             ], 201);
 
-        } catch (ValidationException $e) {
-            DB::rollBack();
-            return response()->json([
-                'success' => false,
-                'message' => 'Error de validación',
-                'errors'  => $e->errors(),
-            ], 422);
-
         } catch (\Throwable $e) {
-            DB::rollBack();
-            Log::error('FATAL ERROR en creación de propiedad:', [
-                'message' => $e->getMessage(),
-                'file'    => $e->getFile(),
-                'line'    => $e->getLine(),
-                'trace'   => $e->getTraceAsString()
+            if (DB::transactionLevel() > 0) DB::rollBack();
+            
+            Log::error('CRASH EN STORE:', [
+                'msg'  => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
             ]);
+
             return response()->json([
                 'success' => false,
-                'message' => 'Error al crear la propiedad',
-                'error'   => $e->getMessage(),
+                'message' => 'Error Fatal: ' . $e->getMessage(),
                 'file'    => $e->getFile(),
                 'line'    => $e->getLine(),
-                'trace'   => config('app.debug') ? $e->getTraceAsString() : 'Check logs for trace',
+                'trace'   => $e->getTrace() // FORZADO para que el usuario lo vea
             ], 500);
         }
     }

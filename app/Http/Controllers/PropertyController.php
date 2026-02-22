@@ -52,17 +52,17 @@ class PropertyController extends Controller
     }
 
     /**
-     * Decodifica y re-codifica included_services garantizando JSON válido.
+     * Decodifica included_services y garantiza que sea un array para el Model Cast.
      */
-    private function normalizeServices(?string $raw): string
+    private function normalizeServices(?string $raw): array
     {
-        if ($raw === null) {
-            return '[]';
+        if ($raw === null || $raw === '' || $raw === '[]' || $raw === 'null') {
+            return [];
         }
         $decoded = json_decode($raw, true);
         return (json_last_error() === JSON_ERROR_NONE && is_array($decoded))
-            ? json_encode($decoded)
-            : '[]';
+            ? $decoded
+            : [];
     }
 
     /**
@@ -214,9 +214,9 @@ class PropertyController extends Controller
         try {
             DB::beginTransaction();
 
-            $validated['included_services'] = $this->normalizeServices($validated['included_services'] ?? null);
-            $validated['user_id']           = $validated['user_id'] ?? $user->id; // ← sin warning
-            $validated['publication_date']  = $validated['publication_date'] ?? now()->toDateString();
+            $validated['included_services'] = $this->normalizeServices($request->input('included_services'));
+            $validated['user_id']           = $request->input('user_id') ?: $user->id;
+            $validated['publication_date']  = $request->input('publication_date') ?: now()->toDateString();
 
             // Auto-aprobar si es admin/support
             if (in_array($user->role, self::ADMIN_ROLES, true)) {
@@ -299,7 +299,7 @@ class PropertyController extends Controller
             'lat'               => 'sometimes|numeric',
             'lng'               => 'sometimes|numeric',
             'images'            => 'sometimes|array',
-            'images.*'          => 'image|mimes:jpeg,png,jpg,gif|max:5120',
+            'images.*'          => 'image|mimes:jpeg,png,jpg,gif,webp|max:5120',
             'delete_images'     => 'sometimes|array',
             'delete_images.*'   => 'integer|exists:property_images,id',
             'reorder_images'    => 'sometimes|array',

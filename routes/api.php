@@ -58,6 +58,9 @@ Route::prefix('auth')->middleware('throttle:10,1')->group(function () {
 | Rutas Protegidas (requieren JWT)
 |--------------------------------------------------------------------------
 */
+// Debug & Storage Testing
+Route::post('/test-upload', [\App\Http\Controllers\FileUploadController::class, 'upload'])->middleware('auth:api');
+
 Route::middleware('auth:api')->group(function () {
 
     // ── Auth (usuario autenticado) ──────────────

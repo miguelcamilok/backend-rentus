@@ -243,8 +243,9 @@ class PropertyController extends Controller
 
             if ($request->hasFile('images')) {
                 Log::info('DEBUG: Procesando imágenes...');
+                $disk = config('filesystems.default', 'public');
                 foreach ($request->file('images') as $index => $file) {
-                    $path = $file->store('properties', 'public');
+                    $path = $file->store('properties', $disk);
                     PropertyImage::create([
                         'property_id' => $property->id,
                         'path'        => $path,
@@ -333,8 +334,9 @@ class PropertyController extends Controller
                     ->where('property_id', $property->id)
                     ->get();
                 
+                $disk = config('filesystems.default', 'public');
                 foreach ($imagesToDelete as $img) {
-                    \Illuminate\Support\Facades\Storage::disk('public')->delete($img->path);
+                    \Illuminate\Support\Facades\Storage::disk($disk)->delete($img->path);
                     $img->delete();
                 }
             }
@@ -345,8 +347,9 @@ class PropertyController extends Controller
             // 3. Agregar nuevas imágenes
             if ($request->hasFile('images')) {
                 $lastOrder = $property->images()->max('order') ?? -1;
+                $disk = config('filesystems.default', 'public');
                 foreach ($request->file('images') as $index => $file) {
-                    $path = $file->store('properties', 'public');
+                    $path = $file->store('properties', $disk);
                     PropertyImage::create([
                         'property_id' => $property->id,
                         'path'        => $path,

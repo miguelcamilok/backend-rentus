@@ -27,10 +27,14 @@ class PropertyImage extends Model
     public function getUrlAttribute()
     {
         if (!$this->path) return null;
+        
+        // Si ya es una URL completa (legacy o external), retornarla tal cual
         if (str_starts_with($this->path, 'http')) {
             return $this->path;
         }
-        return asset('storage/' . $this->path);
+
+        // Usar el disco por defecto (public o s3) para generar la URL correcta
+        return \Illuminate\Support\Facades\Storage::disk(config('filesystems.default', 'public'))->url($this->path);
     }
 
     /**

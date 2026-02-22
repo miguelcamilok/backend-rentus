@@ -35,6 +35,9 @@ Route::prefix('properties')->group(function () {
     Route::post('{id}/views', [PropertyController::class, 'incrementViews']);
 });
 
+// Proxy de Geocoding (Evita CORS en producción)
+Route::get('geocoding/search', [\App\Http\Controllers\GeocodingController::class, 'search']);
+
 /*
 |--------------------------------------------------------------------------
 | Autenticación (con throttle)

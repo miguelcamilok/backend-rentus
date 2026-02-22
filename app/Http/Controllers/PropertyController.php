@@ -165,7 +165,16 @@ class PropertyController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
-        $validated = $request->validate([
+        // Limpiar inputs numéricos que puedan venir como strings vacíos o "NaN" desde el frontend
+        $data = $request->all();
+        foreach (['lat', 'lng', 'accuracy', 'monthly_price', 'area_m2', 'num_bedrooms', 'num_bathrooms'] as $field) {
+            if (isset($data[$field]) && ($data[$field] === '' || $data[$field] === 'NaN' || $data[$field] === 'undefined' || $data[$field] === 'null')) {
+                $data[$field] = null;
+            }
+        }
+
+        // Re-validar con los datos limpios
+        $validator = \Illuminate\Support\Facades\Validator::make($data, [
             'title'             => 'required|string|max:255',
             'description'       => 'required|string',
             'address'           => 'required|string',
@@ -181,9 +190,23 @@ class PropertyController extends Controller
             'accuracy'          => 'nullable|numeric',
             'user_id'           => 'nullable|integer|exists:users,id',
             'images'            => 'nullable|array',
-            'images.*'          => 'image|mimes:jpeg,png,jpg,gif|max:5120',
+            'images.*'          => 'image|mimes:jpeg,png,jpg,gif,webp|max:5120', // Agregado webp
             'publication_date'  => 'nullable|date',
         ]);
+
+        if ($validator->fails()) {
+            Log::warning('Error de validación en creación de propiedad:', [
+                'errors' => $validator->errors()->toArray(),
+                'input'  => $request->except(['images'])
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Error de validación',
+                'errors'  => $validator->errors(),
+            ], 422);
+        }
+
+        $validated = $validator->validated();
 
         // Resolvemos el usuario UNA sola vez para evitar múltiples llamadas a Auth
         $user = $this->authUser();

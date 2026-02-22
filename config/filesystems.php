@@ -43,7 +43,7 @@ return [
             'root' => storage_path('app/public'),
             'url' => env('APP_URL').'/storage',
             'visibility' => 'public',
-            'throw' => false,
+            'throw' => true,
             'report' => false,
         ],
 
@@ -56,8 +56,8 @@ return [
             'url' => env('AWS_URL', 'https://pub-50e712765f0a4cbd8ce10483c8c5a853.r2.dev'),
             'endpoint' => env('AWS_ENDPOINT'),
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', true),
+            'visibility' => 'public',
             'throw' => true,
-            'report' => false,
         ],
 
     ],

@@ -189,8 +189,9 @@ class PaymentController extends Controller
             'receipt_path'  => 'simulated_receipt_' . time() . '.pdf',
         ]);
 
-        // Update contract status to active as requested (UX improvement)
-        $contract->update(['status' => 'active']);
+// El estado del contrato se actualizará mediante el endpoint /accept en el frontend
+        // para asegurar que se ejecute toda la lógica de aceptación (notificaciones, etc.)
+        // $contract->update(['status' => 'active']);
 
         return response()->json([
             'success' => true,

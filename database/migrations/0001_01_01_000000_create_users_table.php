@@ -16,10 +16,10 @@ return new class extends Migration
             $table->string('name');
             $table->string('phone');
             $table->string('email')->unique();
-            $table->string('password_hash');
             $table->string('address');
             $table->string('id_documento');
             $table->string('status');
+            $table->string('verification_status')->default('pending');
             $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
             $table->enum('role', ['user', 'admin', 'support'])->default('user');
@@ -31,6 +31,7 @@ return new class extends Migration
             $table->string('department')->nullable();
             $table->string('city')->nullable();
             $table->rememberToken();
+            $table->softDeletes();
             $table->timestamps();
         });
 

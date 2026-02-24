@@ -47,9 +47,8 @@ class UserFactory extends Factory
             "phone" => "+57" . rand(3000000000, 3999999999),
             "email" => strtolower(str_replace(" ", ".", $name)) . rand(1, 200) . "@gmail.com",
 
-            // Dos campos de contraseña porque la migración tiene ambos
+            // Contraseña estándar de Laravel
             "password" => Hash::make("12345678"),
-            "password_hash" => Hash::make("12345678"),
 
             "address" => "Calle " . rand(1, 120) . " #" . rand(1, 90) . "-" . rand(1, 60) . ", " . $city,
             "id_documento" => strval(rand(1000000000, 1999999999)),

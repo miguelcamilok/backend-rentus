@@ -112,7 +112,6 @@ class UserController extends Controller
             ->except('photo', 'password')
             ->merge([
                 'password'            => Hash::make($validated['password']),
-                'password_hash'       => Hash::make($validated['password']),
                 'verification_status' => 'pending',
             ])
             ->all();

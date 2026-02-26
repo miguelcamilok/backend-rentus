@@ -3,9 +3,8 @@ set -e
 
 # ===== INSTALAR DEPENDENCIAS DE POSTGRESQL =====
 echo "Installing PostgreSQL PHP extension..."
-apt-get update -qq
-apt-get install -y --no-install-recommends libpq-dev php-pgsql
-docker-php-ext-install pdo_pgsql pgsql 2>/dev/null || true
+apt-get update -qq && apt-get install -y --no-install-recommends libpq-dev
+docker-php-ext-install pdo_pgsql pgsql
 echo "PostgreSQL extension installed."
 
 # Deshabilitar TODOS los MPM primero

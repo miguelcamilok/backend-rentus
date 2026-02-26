@@ -7,6 +7,21 @@ apt-get update -qq && apt-get install -y --no-install-recommends libpq-dev
 docker-php-ext-install pdo_pgsql pgsql
 echo "PostgreSQL extension installed."
 
+# ===== GENERAR CLAVES SI NO EXISTEN =====
+if [ -z "$APP_KEY" ]; then
+  echo "APP_KEY not set, generating..."
+  php artisan key:generate --force
+else
+  echo "APP_KEY already set, skipping."
+fi
+
+if [ -z "$JWT_SECRET" ]; then
+  echo "JWT_SECRET not set, generating..."
+  php artisan jwt:secret --force
+else
+  echo "JWT_SECRET already set, skipping."
+fi
+
 # Deshabilitar TODOS los MPM primero
 echo "Disabling all MPM modules..."
 a2dismod mpm_event mpm_worker mpm_prefork worker event 2>/dev/null || true

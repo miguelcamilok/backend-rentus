@@ -19,7 +19,7 @@ return new class extends Migration
             $table->string('address');
             $table->string('id_documento');
             $table->string('status');
-            $table->string('verification_status')->default('pending');
+            // $table->string('verification_status')->default('pending');
             $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
             $table->enum('role', ['user', 'admin', 'support'])->default('user');

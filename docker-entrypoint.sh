@@ -135,12 +135,22 @@ php artisan config:cache
 php artisan route:cache
 php artisan view:cache
 
-# Limpiar cola
+# Limpiar cola (solo si las tablas existen)
 echo "Clearing queue..."
-php artisan queue:clear 2>/dev/null || true
-php artisan queue:flush 2>/dev/null || true
-php artisan tinker --execute="DB::table('jobs')->truncate();" 2>/dev/null || true
-php artisan tinker --execute="DB::table('failed_jobs')->truncate();" 2>/dev/null || true
+php artisan tinker --execute="
+if (Schema::hasTable('jobs')) {
+    DB::table('jobs')->truncate();
+    echo 'jobs table truncated.' . PHP_EOL;
+} else {
+    echo 'jobs table does not exist, skipping.' . PHP_EOL;
+}
+if (Schema::hasTable('failed_jobs')) {
+    DB::table('failed_jobs')->truncate();
+    echo 'failed_jobs table truncated.' . PHP_EOL;
+} else {
+    echo 'failed_jobs table does not exist, skipping.' . PHP_EOL;
+}
+" 2>/dev/null || true
 
 # ===== VERIFICAR CONFIGURACIÓN DE MAIL =====
 echo "🔍 Verificando configuración de Mail..."
